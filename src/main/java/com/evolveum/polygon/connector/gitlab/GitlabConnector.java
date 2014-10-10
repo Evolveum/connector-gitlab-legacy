@@ -22,16 +22,21 @@ import java.util.List;
 import java.util.Set;
 
 import org.gitlab.api.GitlabAPI;
+import org.gitlab.api.models.GitlabAccessLevel;
+import org.gitlab.api.models.GitlabGroup;
+import org.gitlab.api.models.GitlabGroupMember;
 import org.gitlab.api.models.GitlabUser;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.objects.Attribute;
+import org.identityconnectors.framework.common.objects.AttributeBuilder;
 import org.identityconnectors.framework.common.objects.AttributeInfo;
 import org.identityconnectors.framework.common.objects.AttributeInfoBuilder;
 import org.identityconnectors.framework.common.objects.ConnectorObject;
 import org.identityconnectors.framework.common.objects.ConnectorObjectBuilder;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.ObjectClass;
+import org.identityconnectors.framework.common.objects.ObjectClassInfo;
 import org.identityconnectors.framework.common.objects.ObjectClassInfoBuilder;
 import org.identityconnectors.framework.common.objects.OperationOptions;
 import org.identityconnectors.framework.common.objects.OperationalAttributeInfos;
@@ -39,7 +44,6 @@ import org.identityconnectors.framework.common.objects.ResultsHandler;
 import org.identityconnectors.framework.common.objects.Schema;
 import org.identityconnectors.framework.common.objects.SchemaBuilder;
 import org.identityconnectors.framework.common.objects.Uid;
-import org.identityconnectors.framework.common.objects.AttributeInfo.Flags;
 import org.identityconnectors.framework.common.objects.filter.AbstractFilterTranslator;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
@@ -71,6 +75,8 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 	private static final String ATTR_IS_ADMIN = "isAdmin";
 	private static final String ATTR_CAN_CREATE_GROUP = "canCreateGroup";
 	private static final String ATTR_SKIP_CONFIRMATION = "skipConfirmation";
+	private static final String ATTR_PATH = "path";
+	private static final String ATTR_MEMBER = "member";
 
     private GitlabConfiguration configuration;
     private GitlabAPI gitlabAPI;
@@ -91,6 +97,14 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 	public Schema schema() {
 		SchemaBuilder builder = new SchemaBuilder(GitlabConnector.class);
 		
+		builder.defineObjectClass(schemaAccount());
+		builder.defineObjectClass(schemaGroup());
+		
+		return builder.build();
+	}
+
+
+	private ObjectClassInfo schemaAccount() {
 		ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
 		
 		AttributeInfoBuilder attrBuilder = new AttributeInfoBuilder(ATTR_EMAIL);
@@ -112,14 +126,41 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		// __PASSWORD__ attribute
         objClassBuilder.addAttributeInfo(OperationalAttributeInfos.PASSWORD);
 		
-		builder.defineObjectClass(objClassBuilder.build());
-		
-		return builder.build();
+		return objClassBuilder.build();
 	}
 
+	private ObjectClassInfo schemaGroup() {
+		ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
+		objClassBuilder.setType(ObjectClass.GROUP_NAME);
+		
+		AttributeInfoBuilder pathAttrBuilder = new AttributeInfoBuilder(ATTR_PATH);
+		pathAttrBuilder.setRequired(true);
+		pathAttrBuilder.setUpdateable(false);
+		objClassBuilder.addAttributeInfo(pathAttrBuilder.build());
+
+		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER);
+		memberAttrBuilder.setMultiValued(true);
+		objClassBuilder.addAttributeInfo(memberAttrBuilder.build());
+
+		return objClassBuilder.build();
+	}
 
 	@Override
 	public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> attributes, OperationOptions options) {
+		if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+			return updateUser(uid, attributes, options);
+		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+			try {
+				return updateGroup(uid, attributes, options);
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+		} else {
+			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
+		}
+	}
+	
+	private Uid updateUser(Uid uid, Set<Attribute> attributes, OperationOptions options) {
 		Integer targetUserId = toInteger(uid);
 		
 		GitlabUser origUser;
@@ -176,6 +217,65 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		return uid;
 	}
 
+	private Uid updateGroup(Uid uid, Set<Attribute> attributes, OperationOptions options) throws IOException {
+		Integer targetId = toInteger(uid);
+
+		GitlabGroup origGroup = gitlabAPI.getGroup(targetId);
+		if (origGroup == null) {
+			throw new UnknownUidException("Group with ID "+targetId+" does not exist");
+		}
+		
+		String path = getStringAttr(attributes, ATTR_PATH, null);
+		if (path != null) {
+			throw new InvalidAttributeValueException("Group "+ATTR_PATH+" cannot be changed");
+		}
+		String name = getStringAttr(attributes, Name.NAME, null);
+		if (name != null) {
+			throw new InvalidAttributeValueException("Group "+Name.NAME+" cannot be changed");
+		}
+
+		for (Attribute attr: attributes) {
+			if (ATTR_MEMBER.equals(attr.getName())) {
+				List<Object> values = attr.getValue();
+				List<Integer> newMemberIds = new ArrayList<Integer>(values.size());
+				List<Integer> membersToAdd = new ArrayList<Integer>();
+				List<Integer> membersToDelete = new ArrayList<Integer>();
+				List<GitlabGroupMember> origMembers = gitlabAPI.getGroupMembers(origGroup);
+				for (Object attrValue: values) {
+					newMemberIds.add(Integer.parseInt((String) attrValue));
+				}
+				// Primitive. But effective.
+				for (Integer newMemberId: newMemberIds) {
+					boolean found = false;
+					for (GitlabGroupMember origMember: origMembers) {
+						if (origMember.getId() == newMemberId) {
+							found = true;
+							break;
+						}
+						if (!found) {
+							membersToAdd.add(newMemberId);
+						}
+					}
+				}
+				for (GitlabGroupMember origMember: origMembers) {
+					if (!newMemberIds.contains(origMember.getId())) {
+						membersToDelete.add(origMember.getId());
+					}
+				}
+				
+				for (Integer memberId: membersToAdd) {
+					gitlabAPI.addGroupMember(targetId, memberId, GitlabAccessLevel.Developer);
+				}
+				
+				for (Integer memberId: membersToDelete) {
+					gitlabAPI.deleteGroupMember(targetId, memberId);
+				}
+			}
+		}
+		
+		return uid;
+	}
+
 	@Override
 	public void test() {
 		try {
@@ -193,15 +293,31 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 
 	@Override
 	public void executeQuery(ObjectClass objectClass, String query, ResultsHandler resultHandler, OperationOptions options) {
-		List<GitlabUser> gitlabUsers;
-		try {
-			gitlabUsers = gitlabAPI.getUsers();
-		} catch (IOException e) {
-			throw new ConnectorIOException(e);
-		}
-		for (GitlabUser gitlabUser: gitlabUsers) {
-			ConnectorObject connectorObject = convertUserToConnectorObject(gitlabUser);
-			resultHandler.handle(connectorObject);
+		if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+			List<GitlabUser> gitlabUsers;
+			try {
+				gitlabUsers = gitlabAPI.getUsers();
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+			for (GitlabUser gitlabUser: gitlabUsers) {
+				ConnectorObject connectorObject = convertUserToConnectorObject(gitlabUser);
+				resultHandler.handle(connectorObject);
+			}
+			
+		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+			List<GitlabGroup> gitlabGroups;
+			try {
+				gitlabGroups = gitlabAPI.getGroups();
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+			for (GitlabGroup gitlabGroup: gitlabGroups) {
+				ConnectorObject connectorObject = convertGroupToConnectorObject(gitlabGroup);
+				resultHandler.handle(connectorObject);
+			}
+		} else {
+			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
 		}
 	}
 
@@ -223,6 +339,30 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		return builder.build();
 	}
 
+	private ConnectorObject convertGroupToConnectorObject(GitlabGroup gitlabGroup) {
+		ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+		builder.setUid(gitlabGroup.getId().toString());
+		builder.setName(gitlabGroup.getName());
+		addAttr(builder,ATTR_PATH, gitlabGroup.getPath());
+		
+		AttributeBuilder memberAttrBuilder = new AttributeBuilder();
+		memberAttrBuilder.setName(ATTR_MEMBER);
+		List<GitlabGroupMember> groupMembers;
+		try {
+			groupMembers = gitlabAPI.getGroupMembers(gitlabGroup);
+		} catch (IOException e) {
+			throw new ConnectorIOException(e.getMessage(), e);
+		}
+		for (GitlabGroupMember gitlabMember: groupMembers) {
+			Integer id = gitlabMember.getId();
+			memberAttrBuilder.addValue(id);
+		}
+		builder.addAttribute(memberAttrBuilder.build());
+		
+		return builder.build();
+	}
+
+	
 	private <T> void addAttr(ConnectorObjectBuilder builder, String attrName, T attrVal) {
 		if (attrVal != null) {
 			builder.addAttribute(attrName,attrVal);
@@ -231,10 +371,16 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 
 	@Override
 	public void delete(ObjectClass objectClass, Uid uid, OperationOptions options) {
-		try {
-			gitlabAPI.deleteUser(toInteger(uid));
-		} catch (IOException e) {
-			throw new ConnectorIOException(e.getMessage(), e);
+		if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+			try {
+				gitlabAPI.deleteUser(toInteger(uid));
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+			throw new UnsupportedOperationException("Deletion of group seems to be not supported by Gitlab API");
+		} else {
+			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
 		}
 	}
 
@@ -244,6 +390,16 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 
 	@Override
 	public Uid create(ObjectClass objectClass, Set<Attribute> attributes, OperationOptions options) {
+		if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
+			return createUser(attributes, options);
+		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
+			return createGroup(attributes, options);
+		} else {
+			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
+		}
+	}
+			
+	private Uid createUser(Set<Attribute> attributes, OperationOptions options) {
 		String email = getStringAttr(attributes, ATTR_EMAIL);
 		if (email == null) {
 			throw new InvalidAttributeValueException("Missing mandatory attribute "+ATTR_EMAIL);
@@ -291,7 +447,22 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 			throw new ConnectorIOException(e.getMessage(), e);
 		}
 	}
-	
+
+	private Uid createGroup(Set<Attribute> attributes, OperationOptions options) {
+		String name = getStringAttr(attributes, Name.NAME);
+		String path = getStringAttr(attributes, ATTR_PATH);
+		if (path == null) {
+			throw new InvalidAttributeValueException("Missing mandatory attribute "+ATTR_PATH);
+		}		
+		try {
+			GitlabGroup gitlabGroup = gitlabAPI.createGroup(name, path);
+			Integer id = gitlabGroup.getId();
+			return new Uid(id.toString());
+		} catch (IOException e) {
+			throw new ConnectorIOException(e.getMessage(), e);
+		}
+	}
+
     private String getStringAttr(Set<Attribute> attributes, String attrName) throws InvalidAttributeValueException {
     	return getAttr(attributes, attrName, String.class);
     }
