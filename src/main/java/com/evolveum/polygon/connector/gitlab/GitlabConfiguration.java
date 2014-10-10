@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010-2014 Evolveum
+ * Copyright (c) 2014 Evolveum
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,20 +24,32 @@ public class GitlabConfiguration extends AbstractConfiguration {
 
     private static final Log LOG = Log.getLog(GitlabConfiguration.class);
 
-    private String sampleProperty;
+    private String hostUrl;
+    private String apiToken;
 
     @Override
     public void validate() {
         //todo implement
     }
 
-    @ConfigurationProperty(displayMessageKey = "${connectorNameLowerCase}.config.sampleProperty",
-            helpMessageKey = "${connectorNameLowerCase}.config.sampleProperty.help")
-    public String getSampleProperty() {
-        return sampleProperty;
+    @ConfigurationProperty(displayMessageKey = "${connectorNameLowerCase}.config.hostUrl",
+            helpMessageKey = "${connectorNameLowerCase}.config.hostUrl.help")
+    public String getHostUrl() {
+        return hostUrl;
     }
 
-    public void setSampleProperty(String sampleProperty) {
-        this.sampleProperty = sampleProperty;
+    public void setHostUrl(String hostUrl) {
+        this.hostUrl = hostUrl;
     }
+    
+    @ConfigurationProperty(displayMessageKey = "${connectorNameLowerCase}.config.apiToken",
+            helpMessageKey = "${connectorNameLowerCase}.config.apiToken.help")
+    public String getApiToken() {
+        return apiToken;
+    }
+
+    public void setApiToken(String apiToken) {
+        this.apiToken = apiToken;
+    }
+
 }
