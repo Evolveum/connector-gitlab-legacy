@@ -25,6 +25,8 @@ import org.gitlab.api.GitlabAPI;
 import org.gitlab.api.models.GitlabAccessLevel;
 import org.gitlab.api.models.GitlabGroup;
 import org.gitlab.api.models.GitlabGroupMember;
+import org.gitlab.api.models.GitlabProject;
+import org.gitlab.api.models.GitlabProjectMember;
 import org.gitlab.api.models.GitlabUser;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
@@ -62,6 +64,8 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 
     private static final Log LOG = Log.getLog(GitlabConnector.class);
 
+    private static final String OBJECT_CLASS_PROJECT_NAME = "Project";
+    
 	private static final String ATTR_EMAIL = "email";
 	private static final String ATTR_FULL_NAME = "fullName";
 	private static final String ATTR_SKYPE_ID = "skypeId";
@@ -77,6 +81,21 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 	private static final String ATTR_SKIP_CONFIRMATION = "skipConfirmation";
 	private static final String ATTR_PATH = "path";
 	private static final String ATTR_MEMBER = "member";
+	private static final String ATTR_DEFAULT_BRANCH = "defaultBranch";
+	private static final String ATTR_DESCRIPTION = "description";
+	private static final String ATTR_HTTP_URL = "httpUrl";
+	private static final String ATTR_NAMESPACE = "namespace";
+	private static final String ATTR_OWNER = "owner";
+	private static final String ATTR_SSH_URL = "sshUrl";
+	private static final String ATTR_VISIBILITY_LEVEL = "visibilityLevel";
+	private static final String ATTR_WEB_URL = "webUrl";
+	private static final String ATTR_ISSUES_ENABLED = "issuesEnabled";
+	private static final String ATTR_WALL_ENABLED = "wallEnabled";
+	private static final String ATTR_MERGE_REQUESTS_ENABLED = "requestsEnabled";
+	private static final String ATTR_WIKI_ENABLED = "wikiEnabled";
+	private static final String ATTR_SNIPPETS_ENABLED = "snippetsEnabled";
+	private static final String ATTR_PUBLIC = "public";
+	private static final String ATTR_IMPORT_URL = "importUrl";
 
     private GitlabConfiguration configuration;
     private GitlabAPI gitlabAPI;
@@ -99,6 +118,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		
 		builder.defineObjectClass(schemaAccount());
 		builder.defineObjectClass(schemaGroup());
+		builder.defineObjectClass(schemaProject());
 		
 		return builder.build();
 	}
@@ -145,6 +165,37 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		return objClassBuilder.build();
 	}
 
+	private ObjectClassInfo schemaProject() {
+		ObjectClassInfoBuilder objClassBuilder = new ObjectClassInfoBuilder();
+		objClassBuilder.setType(OBJECT_CLASS_PROJECT_NAME);
+		
+		AttributeInfoBuilder namespaceAttrBuilder = new AttributeInfoBuilder(ATTR_NAMESPACE, Integer.class);
+		namespaceAttrBuilder.setRequired(true);
+		namespaceAttrBuilder.setUpdateable(false);
+		objClassBuilder.addAttributeInfo(namespaceAttrBuilder.build());
+		
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_PATH).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_DEFAULT_BRANCH).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_DESCRIPTION).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_HTTP_URL).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_OWNER).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_SSH_URL).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_VISIBILITY_LEVEL, Integer.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_WEB_URL).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_ISSUES_ENABLED, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_WALL_ENABLED, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_MERGE_REQUESTS_ENABLED, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_WIKI_ENABLED, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_SNIPPETS_ENABLED, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_PUBLIC, Boolean.class).build());
+
+		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER);
+		memberAttrBuilder.setMultiValued(true);
+		objClassBuilder.addAttributeInfo(memberAttrBuilder.build());
+
+		return objClassBuilder.build();
+	}
+
 	@Override
 	public Uid update(ObjectClass objectClass, Uid uid, Set<Attribute> attributes, OperationOptions options) {
 		if (objectClass.is(ObjectClass.ACCOUNT_NAME)) {
@@ -152,6 +203,12 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
 			try {
 				return updateGroup(uid, attributes, options);
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+		} else if (objectClass.is(OBJECT_CLASS_PROJECT_NAME)) {
+			try {
+				return updateProject(uid, attributes, options);
 			} catch (IOException e) {
 				throw new ConnectorIOException(e.getMessage(), e);
 			}
@@ -276,6 +333,66 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		return uid;
 	}
 
+	private Uid updateProject(Uid uid, Set<Attribute> attributes, OperationOptions options) throws IOException {
+		Integer targetId = toInteger(uid);
+
+		GitlabProject origProject = gitlabAPI.getProject(uid.getUidValue());
+		if (origProject == null) {
+			throw new UnknownUidException("Project with ID "+targetId+" does not exist");
+		}
+		
+		String path = getStringAttr(attributes, ATTR_PATH, null);
+		if (path != null) {
+			throw new InvalidAttributeValueException("Project "+ATTR_PATH+" cannot be changed");
+		}
+		String name = getStringAttr(attributes, Name.NAME, null);
+		if (name != null) {
+			throw new InvalidAttributeValueException("Project "+Name.NAME+" cannot be changed");
+		}
+		// TODO: check for other non-changable attributes
+
+		for (Attribute attr: attributes) {
+			if (ATTR_MEMBER.equals(attr.getName())) {
+				List<Object> values = attr.getValue();
+				List<Integer> newMemberIds = new ArrayList<Integer>(values.size());
+				List<Integer> membersToAdd = new ArrayList<Integer>();
+				List<Integer> membersToDelete = new ArrayList<Integer>();
+				List<GitlabProjectMember> origMembers = gitlabAPI.getProjectMembers(origProject);
+				for (Object attrValue: values) {
+					newMemberIds.add(Integer.parseInt((String) attrValue));
+				}
+				// Primitive. But effective.
+				for (Integer newMemberId: newMemberIds) {
+					boolean found = false;
+					for (GitlabProjectMember origMember: origMembers) {
+						if (origMember.getId() == newMemberId) {
+							found = true;
+							break;
+						}
+						if (!found) {
+							membersToAdd.add(newMemberId);
+						}
+					}
+				}
+				for (GitlabProjectMember origMember: origMembers) {
+					if (!newMemberIds.contains(origMember.getId())) {
+						membersToDelete.add(origMember.getId());
+					}
+				}
+				
+				for (Integer memberId: membersToAdd) {
+					gitlabAPI.addProjectMember(targetId, memberId, GitlabAccessLevel.Developer);
+				}
+				
+				for (Integer memberId: membersToDelete) {
+					gitlabAPI.deleteProjectMember(targetId, memberId);
+				}
+			}
+		}
+		
+		return uid;
+	}
+
 	@Override
 	public void test() {
 		try {
@@ -316,6 +433,18 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 				ConnectorObject connectorObject = convertGroupToConnectorObject(gitlabGroup);
 				resultHandler.handle(connectorObject);
 			}
+		} else if (objectClass.is(OBJECT_CLASS_PROJECT_NAME)) {
+			List<GitlabProject> gitlabProjects;
+			try {
+				gitlabProjects = gitlabAPI.getProjects();
+			} catch (IOException e) {
+				throw new ConnectorIOException(e.getMessage(), e);
+			}
+			LOG.ok("GITLAB projects: "+gitlabProjects);
+			for (GitlabProject gitlabProject: gitlabProjects) {
+				ConnectorObject connectorObject = convertProjectToConnectorObject(gitlabProject);
+				resultHandler.handle(connectorObject);
+			}			
 		} else {
 			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
 		}
@@ -341,6 +470,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 
 	private ConnectorObject convertGroupToConnectorObject(GitlabGroup gitlabGroup) {
 		ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+		builder.setObjectClass(ObjectClass.GROUP);
 		builder.setUid(gitlabGroup.getId().toString());
 		builder.setName(gitlabGroup.getName());
 		addAttr(builder,ATTR_PATH, gitlabGroup.getPath());
@@ -353,15 +483,56 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		} catch (IOException e) {
 			throw new ConnectorIOException(e.getMessage(), e);
 		}
-		for (GitlabGroupMember gitlabMember: groupMembers) {
-			Integer id = gitlabMember.getId();
-			memberAttrBuilder.addValue(id);
+		if (groupMembers != null && !groupMembers.isEmpty()) {
+			for (GitlabGroupMember gitlabMember: groupMembers) {
+				Integer id = gitlabMember.getId();
+				memberAttrBuilder.addValue(id);
+			}
+			builder.addAttribute(memberAttrBuilder.build());
 		}
-		builder.addAttribute(memberAttrBuilder.build());
 		
 		return builder.build();
 	}
 
+	private ConnectorObject convertProjectToConnectorObject(GitlabProject gitlabProject) {
+		ConnectorObjectBuilder builder = new ConnectorObjectBuilder();
+		builder.setObjectClass(new ObjectClass(OBJECT_CLASS_PROJECT_NAME));
+		builder.setUid(gitlabProject.getId().toString());
+		builder.setName(gitlabProject.getName());
+		addAttr(builder,ATTR_PATH, gitlabProject.getPath());
+		addAttr(builder,ATTR_DEFAULT_BRANCH, gitlabProject.getDefaultBranch());
+		addAttr(builder,ATTR_DESCRIPTION, gitlabProject.getDescription());
+		addAttr(builder,ATTR_HTTP_URL, gitlabProject.getHttpUrl());
+		addAttr(builder,ATTR_NAMESPACE, gitlabProject.getNamespace().getId());
+		addAttr(builder,ATTR_OWNER, gitlabProject.getOwner().getId());
+		addAttr(builder,ATTR_SSH_URL, gitlabProject.getSshUrl());
+		addAttr(builder,ATTR_VISIBILITY_LEVEL, gitlabProject.getVisibilityLevel());
+		addAttr(builder,ATTR_WEB_URL, gitlabProject.getWebUrl());
+		addAttr(builder,ATTR_ISSUES_ENABLED, gitlabProject.isIssuesEnabled());
+		addAttr(builder,ATTR_MERGE_REQUESTS_ENABLED, gitlabProject.isMergeRequestsEnabled());
+		addAttr(builder,ATTR_PUBLIC, gitlabProject.isPublic());
+		addAttr(builder,ATTR_SNIPPETS_ENABLED, gitlabProject.isSnippetsEnabled());
+		addAttr(builder,ATTR_WALL_ENABLED, gitlabProject.isWallEnabled());
+		addAttr(builder,ATTR_WIKI_ENABLED, gitlabProject.isWikiEnabled());
+		
+		AttributeBuilder memberAttrBuilder = new AttributeBuilder();
+		memberAttrBuilder.setName(ATTR_MEMBER);
+		List<GitlabProjectMember> members;
+		try {
+			members = gitlabAPI.getProjectMembers(gitlabProject);
+		} catch (IOException e) {
+			throw new ConnectorIOException(e.getMessage(), e);
+		}
+		if (members != null && !members.isEmpty()) {
+			for (GitlabProjectMember gitlabMember: members) {
+				Integer id = gitlabMember.getId();
+				memberAttrBuilder.addValue(id);
+			}
+			builder.addAttribute(memberAttrBuilder.build());
+		}
+		
+		return builder.build();
+	}
 	
 	private <T> void addAttr(ConnectorObjectBuilder builder, String attrName, T attrVal) {
 		if (attrVal != null) {
@@ -379,6 +550,8 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 			}
 		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
 			throw new UnsupportedOperationException("Deletion of group seems to be not supported by Gitlab API");
+		} else if (objectClass.is(OBJECT_CLASS_PROJECT_NAME)) {
+			throw new UnsupportedOperationException("Deletion of project seems to be not supported by Gitlab API");
 		} else {
 			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
 		}
@@ -394,6 +567,8 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 			return createUser(attributes, options);
 		} else if (objectClass.is(ObjectClass.GROUP_NAME)) {
 			return createGroup(attributes, options);
+		} else if (objectClass.is(OBJECT_CLASS_PROJECT_NAME)) {
+			return createProject(attributes, options);
 		} else {
 			throw new UnsupportedOperationException("Unsupported object class "+objectClass);
 		}
@@ -457,6 +632,31 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		try {
 			GitlabGroup gitlabGroup = gitlabAPI.createGroup(name, path);
 			Integer id = gitlabGroup.getId();
+			return new Uid(id.toString());
+		} catch (IOException e) {
+			throw new ConnectorIOException(e.getMessage(), e);
+		}
+	}
+
+	private Uid createProject(Set<Attribute> attributes, OperationOptions options) {
+		String name = getStringAttr(attributes, Name.NAME);
+		Integer namespaceId = getAttr(attributes, ATTR_NAMESPACE, Integer.class);
+		if (namespaceId == null) {
+			throw new InvalidAttributeValueException("Missing mandatory attribute "+ATTR_NAMESPACE);
+		}
+		String description = getStringAttr(attributes, ATTR_DESCRIPTION);
+		Boolean issuesEnabled = getAttr(attributes, ATTR_ISSUES_ENABLED, Boolean.class);
+		Boolean wallEnabled = getAttr(attributes, ATTR_WALL_ENABLED, Boolean.class);
+		Boolean mergeRequestsEnabled = getAttr(attributes, ATTR_MERGE_REQUESTS_ENABLED, Boolean.class);
+		Boolean wikiEnabled = getAttr(attributes, ATTR_WIKI_ENABLED, Boolean.class);
+		Boolean snippetsEnabled = getAttr(attributes, ATTR_SNIPPETS_ENABLED, Boolean.class);
+		Boolean publik = getAttr(attributes, ATTR_PUBLIC, Boolean.class);
+		Integer visibilityLevel = getAttr(attributes, ATTR_VISIBILITY_LEVEL, Integer.class);
+		String importUrl = getStringAttr(attributes, ATTR_IMPORT_URL);
+		
+		try {
+			GitlabProject gitlabProject = gitlabAPI.createProject(name, namespaceId, description, issuesEnabled, wallEnabled, mergeRequestsEnabled, wikiEnabled, snippetsEnabled, publik, visibilityLevel, importUrl);
+			Integer id = gitlabProject.getId();
 			return new Uid(id.toString());
 		} catch (IOException e) {
 			throw new ConnectorIOException(e.getMessage(), e);
