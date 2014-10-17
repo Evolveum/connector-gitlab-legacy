@@ -158,7 +158,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		pathAttrBuilder.setUpdateable(false);
 		objClassBuilder.addAttributeInfo(pathAttrBuilder.build());
 
-		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER);
+		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER, Integer.class);
 		memberAttrBuilder.setMultiValued(true);
 		objClassBuilder.addAttributeInfo(memberAttrBuilder.build());
 
@@ -189,7 +189,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_SNIPPETS_ENABLED, Boolean.class).build());
 		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_PUBLIC, Boolean.class).build());
 
-		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER);
+		AttributeInfoBuilder memberAttrBuilder = new AttributeInfoBuilder(ATTR_MEMBER, Integer.class);
 		memberAttrBuilder.setMultiValued(true);
 		objClassBuilder.addAttributeInfo(memberAttrBuilder.build());
 
@@ -309,9 +309,9 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 							found = true;
 							break;
 						}
-						if (!found) {
-							membersToAdd.add(newMemberId);
-						}
+					}
+					if (!found) {
+						membersToAdd.add(newMemberId);
 					}
 				}
 				for (GitlabGroupMember origMember: origMembers) {
@@ -369,9 +369,9 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 							found = true;
 							break;
 						}
-						if (!found) {
-							membersToAdd.add(newMemberId);
-						}
+					}
+					if (!found) {
+						membersToAdd.add(newMemberId);
 					}
 				}
 				for (GitlabProjectMember origMember: origMembers) {
@@ -380,11 +380,15 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 					}
 				}
 				
+				LOG.ok("MEMBERS: {0}\nnewMemberIds: {1}\norigMembers: {2}\nadd: {3}\ndelete:{4}", targetId, newMemberIds, origMembers, membersToAdd, membersToDelete);
+				
 				for (Integer memberId: membersToAdd) {
+					LOG.ok("Adding account {0} to project {1}", targetId, memberId);
 					gitlabAPI.addProjectMember(targetId, memberId, GitlabAccessLevel.Developer);
 				}
 				
 				for (Integer memberId: membersToDelete) {
+					LOG.ok("Deleting account {0} from project {1}", targetId, memberId);
 					gitlabAPI.deleteProjectMember(targetId, memberId);
 				}
 			}
@@ -436,7 +440,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		} else if (objectClass.is(OBJECT_CLASS_PROJECT_NAME)) {
 			List<GitlabProject> gitlabProjects;
 			try {
-				gitlabProjects = gitlabAPI.getProjects();
+				gitlabProjects = gitlabAPI.getAllProjects();
 			} catch (IOException e) {
 				throw new ConnectorIOException(e.getMessage(), e);
 			}
@@ -504,7 +508,10 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		addAttr(builder,ATTR_DESCRIPTION, gitlabProject.getDescription());
 		addAttr(builder,ATTR_HTTP_URL, gitlabProject.getHttpUrl());
 		addAttr(builder,ATTR_NAMESPACE, gitlabProject.getNamespace().getId());
-		addAttr(builder,ATTR_OWNER, gitlabProject.getOwner().getId());
+		GitlabUser owner = gitlabProject.getOwner();
+		if (owner != null) {
+			addAttr(builder,ATTR_OWNER, owner.getId());
+		}
 		addAttr(builder,ATTR_SSH_URL, gitlabProject.getSshUrl());
 		addAttr(builder,ATTR_VISIBILITY_LEVEL, gitlabProject.getVisibilityLevel());
 		addAttr(builder,ATTR_WEB_URL, gitlabProject.getWebUrl());
