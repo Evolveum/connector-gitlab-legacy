@@ -110,6 +110,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
         this.configuration = (GitlabConfiguration)configuration;
         gitlabAPI = GitlabAPI.connect(this.configuration.getHostUrl(),
         		this.configuration.getApiToken());
+        gitlabAPI.ignoreCertificateErrors(this.configuration.getIgnoreCertificateErrors());
     }
     
 	@Override
@@ -264,7 +265,6 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		if (skip_confirmation == null) {
 			skip_confirmation = Boolean.TRUE;
 		}
-
 		try {
 			GitlabUser gitlabUser = gitlabAPI.updateUser(targetUserId, email, password, username, fullName, skypeId, linkedIn, twitter, website_url, projects_limit, extern_uid, extern_provider_name, bio, isAdmin, can_create_group, skip_confirmation);
 		} catch (IOException e) {

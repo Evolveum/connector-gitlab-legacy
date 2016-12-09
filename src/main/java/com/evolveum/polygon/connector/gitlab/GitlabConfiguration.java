@@ -17,23 +17,21 @@
 package com.evolveum.polygon.connector.gitlab;
 
 import org.identityconnectors.framework.spi.AbstractConfiguration;
-import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.spi.ConfigurationProperty;
 
 public class GitlabConfiguration extends AbstractConfiguration {
 
-    private static final Log LOG = Log.getLog(GitlabConfiguration.class);
-
     private String hostUrl;
     private String apiToken;
+    private boolean ignoreCertificateErrors = false;
 
     @Override
     public void validate() {
         //todo implement
     }
 
-    @ConfigurationProperty(displayMessageKey = "${connectorNameLowerCase}.config.hostUrl",
-            helpMessageKey = "${connectorNameLowerCase}.config.hostUrl.help")
+    @ConfigurationProperty(displayMessageKey = "gitlab.config.hostUrl",
+            helpMessageKey = "gitlab.config.hostUrl.help")
     public String getHostUrl() {
         return hostUrl;
     }
@@ -41,9 +39,9 @@ public class GitlabConfiguration extends AbstractConfiguration {
     public void setHostUrl(String hostUrl) {
         this.hostUrl = hostUrl;
     }
-    
-    @ConfigurationProperty(displayMessageKey = "${connectorNameLowerCase}.config.apiToken",
-            helpMessageKey = "${connectorNameLowerCase}.config.apiToken.help")
+
+    @ConfigurationProperty(displayMessageKey = "gitlab.config.apiToken",
+            helpMessageKey = "gitlab.config.apiToken.help")
     public String getApiToken() {
         return apiToken;
     }
@@ -52,4 +50,13 @@ public class GitlabConfiguration extends AbstractConfiguration {
         this.apiToken = apiToken;
     }
 
+    @ConfigurationProperty(displayMessageKey = "gitlab.config.ignoreCertificateErrors",
+            helpMessageKey = "gitlab.config.ignoreCertificateErrors.help")
+    public boolean getIgnoreCertificateErrors() {
+        return ignoreCertificateErrors;
+    }
+
+    public void setIgnoreCertificateErrors(boolean ignoreCertificateErrors) {
+        this.ignoreCertificateErrors = ignoreCertificateErrors;
+    }
 }
