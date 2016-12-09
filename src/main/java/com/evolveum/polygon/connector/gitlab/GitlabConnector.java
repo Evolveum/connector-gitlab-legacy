@@ -32,7 +32,6 @@ import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.framework.common.objects.Attribute;
 import org.identityconnectors.framework.common.objects.AttributeBuilder;
-import org.identityconnectors.framework.common.objects.AttributeInfo;
 import org.identityconnectors.framework.common.objects.AttributeInfoBuilder;
 import org.identityconnectors.framework.common.objects.ConnectorObject;
 import org.identityconnectors.framework.common.objects.ConnectorObjectBuilder;
@@ -78,7 +77,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 	private static final String ATTR_BIO = "bio";
 	private static final String ATTR_IS_ADMIN = "isAdmin";
 	private static final String ATTR_CAN_CREATE_GROUP = "canCreateGroup";
-	private static final String ATTR_SKIP_CONFIRMATION = "skipConfirmation";
+	private static final String ATTR_CONFIRM = "confirm";
 	private static final String ATTR_PATH = "path";
 	private static final String ATTR_MEMBER = "member";
 	private static final String ATTR_DEFAULT_BRANCH = "defaultBranch";
@@ -143,7 +142,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_BIO).build());
 		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_IS_ADMIN, Boolean.class).build());
 		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_CAN_CREATE_GROUP, Boolean.class).build());
-		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_SKIP_CONFIRMATION, Boolean.class).build());
+		objClassBuilder.addAttributeInfo(new AttributeInfoBuilder(ATTR_CONFIRM, Boolean.class).build());
 		// __PASSWORD__ attribute
         objClassBuilder.addAttributeInfo(OperationalAttributeInfos.PASSWORD);
 		
@@ -261,12 +260,8 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		String bio = getStringAttr(attributes, ATTR_BIO, origUser.getBio());
 		Boolean isAdmin = getAttr(attributes, ATTR_IS_ADMIN, Boolean.class, origUser.isAdmin());
 		Boolean can_create_group = getAttr(attributes, ATTR_CAN_CREATE_GROUP, Boolean.class, origUser.isCanCreateGroup());
-		Boolean skip_confirmation = getAttr(attributes, ATTR_SKIP_CONFIRMATION, Boolean.class);
-		if (skip_confirmation == null) {
-			skip_confirmation = Boolean.TRUE;
-		}
 		try {
-			GitlabUser gitlabUser = gitlabAPI.updateUser(targetUserId, email, password, username, fullName, skypeId, linkedIn, twitter, website_url, projects_limit, extern_uid, extern_provider_name, bio, isAdmin, can_create_group, skip_confirmation);
+			GitlabUser gitlabUser = gitlabAPI.updateUser(targetUserId, email, password, username, fullName, skypeId, linkedIn, twitter, website_url, projects_limit, extern_uid, extern_provider_name, bio, isAdmin, can_create_group);
 		} catch (IOException e) {
 			throw new ConnectorIOException(e.getMessage(), e);
 		}
@@ -614,7 +609,7 @@ public class GitlabConnector implements Connector, CreateOp, DeleteOp, SchemaOp,
 		String bio = getStringAttr(attributes, ATTR_BIO);
 		Boolean isAdmin = getAttr(attributes, ATTR_IS_ADMIN, Boolean.class);
 		Boolean can_create_group = getAttr(attributes, ATTR_CAN_CREATE_GROUP, Boolean.class);;
-		Boolean skip_confirmation = getAttr(attributes, ATTR_SKIP_CONFIRMATION, Boolean.class);
+		Boolean skip_confirmation = getAttr(attributes, ATTR_CONFIRM, Boolean.class);
 		if (skip_confirmation == null) {
 			skip_confirmation = Boolean.TRUE;
 		}
