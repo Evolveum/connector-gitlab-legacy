@@ -15,7 +15,8 @@
  */
 
 package com.evolveum.polygon.connector.gitlab;
-
+import org.identityconnectors.common.StringUtil;
+import org.identityconnectors.framework.common.exceptions.ConfigurationException;
 import org.identityconnectors.framework.spi.AbstractConfiguration;
 import org.identityconnectors.framework.spi.ConfigurationProperty;
 
@@ -27,7 +28,12 @@ public class GitlabConfiguration extends AbstractConfiguration {
 
     @Override
     public void validate() {
-        //todo implement
+    	if (StringUtil.isBlank(hostUrl)) {
+    		throw new ConfigurationException("host.blank");
+    	}
+    	if (StringUtil.isBlank(apiToken)) {
+    		throw new ConfigurationException("token.blank");
+    	}
     }
 
     @ConfigurationProperty(displayMessageKey = "gitlab.config.hostUrl",
